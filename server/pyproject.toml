@@ -1,0 +1,27 @@
+[project]
+name = "project-server"
+version = "0.1.0"
+description = "Server skeleton of the Web course project: plumbing only, the lab items are yours"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.149.0",
+    "uvicorn[standard]>=0.54.0",
+    "psycopg[binary,pool]>=3.3.6",
+    "aiokafka>=0.14.0",
+    "redis>=8.1.0",
+    "httpx>=0.28.1",
+    "opentelemetry-sdk>=1.45.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.1",
+    "opentelemetry-instrumentation-fastapi>=0.66b1",
+    "opentelemetry-instrumentation-psycopg>=0.66b1",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.17.1"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"

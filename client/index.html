@@ -1,0 +1,150 @@
+<!doctype html>
+<!-- Shell of the web client: login and one request form. Replace the form with the scenarios of
+     your card (O1.7, O3.4, O4.5, O5.4). Run: python -m http.server 8081 --bind 127.0.0.1 --directory client -->
+<html lang="uk">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Клієнт проєкту</title>
+    <style>
+        body {
+            font: 15px/1.5 system-ui, sans-serif;
+            max-width: 48rem;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        fieldset {
+            margin-bottom: 1.5rem;
+            border: 1px solid #ccc;
+        }
+
+        label {
+            display: block;
+            margin: .4rem 0;
+        }
+
+        input, select, textarea {
+            font: inherit;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            height: 6rem;
+            font-family: ui-monospace, monospace;
+        }
+
+        button {
+            font: inherit;
+            margin-top: .5rem;
+        }
+
+        pre {
+            background: #f3f3f3;
+            padding: .75rem;
+            white-space: pre-wrap;
+        }
+
+        .problem {
+            color: #a00;
+        }
+    </style>
+</head>
+<body>
+    <h1>Клієнт проєкту</h1>
+
+    <fieldset>
+        <legend>Вхід</legend>
+        <form id="login-form">
+            <label>Логін <input name="login" autocomplete="username" required></label>
+            <label>Пароль <input name="password" type="password" autocomplete="current-password" required></label>
+            <button>Увійти</button>
+            <button type="button" id="logout">Вийти</button>
+        </form>
+        <p id="who">Не виконано вхід.</p>
+    </fieldset>
+
+    <fieldset>
+        <legend>Запит</legend>
+        <form id="request-form">
+            <label>Метод
+                <select name="method">
+                    <option>GET</option>
+                    <option>POST</option>
+                    <option>PATCH</option>
+                    <option>DELETE</option>
+                </select>
+            </label>
+            <label>Шлях <input name="path" value="/v1/me"></label>
+            <label>Тіло JSON (порожньо — без тіла)
+                <textarea name="body"></textarea>
+            </label>
+            <label><input type="checkbox" name="idempotent" style="width:auto"> з новим Idempotency-Key</label>
+            <button>Надіслати</button>
+        </form>
+    </fieldset>
+
+    <h2>Відповідь</h2>
+    <pre id="out">—</pre>
+
+    <script type="module">
+        import {call, login, logout, newKey, Problem} from "./api.js";
+
+        const out = document.getElementById("out");
+
+        const show = (value, isProblem = false) => {
+            out.className = isProblem ? "problem" : "";
+            out.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+        };
+
+        const report = (error) =>
+            error instanceof Problem
+                ? show({status: error.status, ...error.body}, true)
+                : show(String(error), true);
+
+        async function refreshWho() {
+            try {
+                const {data} = await call("GET", "/v1/me");
+                document.getElementById("who").textContent = `${data.name ?? data.id} (${data.role})`;
+            } catch {
+                document.getElementById("who").textContent = "Не виконано вхід.";
+            }
+        }
+
+        document.getElementById("login-form").onsubmit = async (event) => {
+            event.preventDefault();
+            const form = new FormData(event.target);
+            try {
+                await login(form.get("login"), form.get("password"));
+                await refreshWho();
+                show("вхід виконано");
+            } catch (error) {
+                report(error);
+            }
+        };
+
+        document.getElementById("logout").onclick = async () => {
+            await logout().catch(report);
+            await refreshWho();
+        };
+
+        document.getElementById("request-form").onsubmit = async (event) => {
+            event.preventDefault();
+            const form = new FormData(event.target);
+            const text = form.get("body").trim();
+            try {
+                const reply = await call(form.get("method"), form.get("path"), {
+                    body: text ? JSON.parse(text) : undefined,
+                    idempotencyKey: form.get("idempotent") ? newKey() : undefined,
+                });
+                show({status: reply.status, location: reply.headers.get("location"), body: reply.data});
+            } catch (error) {
+                report(error);
+            }
+        };
+
+        refreshWho();
+    </script>
+</body>
+</html>

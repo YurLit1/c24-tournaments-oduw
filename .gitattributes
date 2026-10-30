@@ -1,0 +1,2 @@
+# Shell scripts run inside Linux containers: CRLF line endings break them ("\r: not found").
+*.sh text eol=lf

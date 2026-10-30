@@ -1,0 +1,91 @@
+{
+  "realm": "project",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "user",
+        "description": "the user role of the card"
+      },
+      {
+        "name": "staff",
+        "description": "the staff role of the card"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "web-client",
+      "name": "Project web client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "web-client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8081/*",
+        "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8081"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8081/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "web-client",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "user1",
+      "enabled": true,
+      "firstName": "User",
+      "lastName": "One",
+      "email": "user1@project.example",
+      "emailVerified": true,
+      "realmRoles": [
+        "user"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "user1-pass",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "staff1",
+      "enabled": true,
+      "firstName": "Staff",
+      "lastName": "One",
+      "email": "staff1@project.example",
+      "emailVerified": true,
+      "realmRoles": [
+        "staff"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "staff1-pass",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

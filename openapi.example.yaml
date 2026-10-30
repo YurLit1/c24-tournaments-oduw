@@ -1,0 +1,795 @@
+# Example contract (OpenAPI 3.1) for the invented domain "Міська бібліотека": readers hold
+# copies of books in branches. Copy it as openapi.yaml and replace the holds with your card.
+#   - Keep the service routes (/health ... /v1/ws): they are the same for every topic.
+#   - x-course marks what a route means for the teacher's check: main, list, object, cancel,
+#     update, staff-action, long-operation.
+#   - Request examples the check sends: main operation `normal`, `scarce` (x-capacity: N units,
+#     the race and 409), `missing` (404); update `normal`, `forbidden` (422). Values must exist
+#     in your seed data (migrations/examples/900_library_seed.sql here).
+#   - Keep ONE way of login (token or cookie session) and delete the other security scheme.
+openapi: 3.1.0
+info:
+  title: Міська бібліотека
+  version: 1.0.0
+  description: |
+    Контракт API. Помилки — Problem Details (RFC 9457, `application/problem+json`).
+    Ідентифікатори — рядки. Гроші — ціле число мінімальних одиниць і валюта. Час — RFC 3339 із зоною.
+servers:
+  - url: http://localhost:8080
+security:
+  - bearerAuth: []
+
+tags:
+  - name: service
+  - name: auth
+  - name: holds
+    description: Бронювання примірника книги у філії
+  - name: operations
+  - name: notifications
+
+paths:
+  /health:
+    get:
+      tags:
+        - service
+      operationId: getHealth
+      summary: Перевірка живучості процесу, без звернення до бази
+      security: []
+      responses:
+        "200":
+          description: Процес відповідає
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  instance:
+                    type: string
+  /ready:
+    get:
+      tags:
+        - service
+      operationId: getReady
+      summary: Готовність приймати запити (база доступна, процес не завершується)
+      security: []
+      responses:
+        "200":
+          description: Готовий
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /v1/auth/login:
+    post:
+      tags:
+        - auth
+      operationId: login
+      summary: Вхід
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - login
+                - password
+              properties:
+                login:
+                  type: string
+                password:
+                  type: string
+                  format: password
+            examples:
+              reader:
+                value:
+                  login: reader1
+                  password: reader-pass
+              staff:
+                value:
+                  login: librarian
+                  password: librarian-pass
+      responses:
+        "200":
+          description: Вхід виконано (токен у тілі або cookie сесії — оберіть одне)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                    examples:
+                      - Bearer
+                  expires_at:
+                    type: string
+                    format: date-time
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/auth/logout:
+    post:
+      tags:
+        - auth
+      operationId: logout
+      summary: Вихід
+      responses:
+        "204":
+          description: Вихід виконано
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/me:
+    get:
+      tags:
+        - auth
+      operationId: getMe
+      summary: Поточна особа й роль
+      responses:
+        "200":
+          description: Поточний користувач
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - role
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  role:
+                    type: string
+                    enum:
+                      - user
+                      - staff
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/holds:
+    get:
+      tags:
+        - holds
+      operationId: listHolds
+      summary: Мої бронювання, від найновіших
+      x-course: list
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Сторінка списку
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Page"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Hold"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+    post:
+      tags:
+        - holds
+      operationId: createHold
+      summary: Забронювати примірник (зменшує кількість вільних примірників у філії)
+      x-course: main
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HoldCreate"
+            examples:
+              normal:
+                summary: Книга, вільних примірників якої достатньо
+                value:
+                  book_id: b01
+                  branch_id: central
+              scarce:
+                summary: Книга з одним примірником — для досліду гонки
+                value:
+                  book_id: b-one
+                  branch_id: central
+                x-capacity: 1
+              missing:
+                summary: Такої книги у філії немає — 404
+                value:
+                  book_id: no-such-book
+                  branch_id: central
+      responses:
+        "201":
+          description: Створено
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/holds/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags:
+        - holds
+      operationId: getHold
+      summary: Одне бронювання (чуже — 404)
+      x-course: object
+      responses:
+        "200":
+          description: Об'єкт
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags:
+        - holds
+      operationId: updateHold
+      summary: Змінити ім'я того, хто забере книгу (If-Match, Д2.4). Поля власника, стану й версії — 422
+      x-course: update
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HoldUpdate"
+            examples:
+              normal:
+                summary: Дозволена зміна
+                value:
+                  pickup_name: Олена Коваль
+              forbidden:
+                summary: Спроба змінити стан — 422
+                value:
+                  status: collected
+      responses:
+        "200":
+          description: Змінено
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "428":
+          $ref: "#/components/responses/PreconditionRequired"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/holds/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags:
+        - holds
+      operationId: cancelHold
+      summary: Скасувати бронювання (повтор повертає той самий стан)
+      x-course: cancel
+      responses:
+        "200":
+          description: Поточний стан після скасування
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/holds/{id}/collect:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags:
+        - holds
+      operationId: collectHold
+      summary: Видати книгу читачеві (лише роль staff)
+      x-course: staff-action
+      responses:
+        "200":
+          description: Виконано
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/holds/{id}/delivery:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags:
+        - holds
+      operationId: startDelivery
+      summary: Замовити доставку кур'єром (зовнішня система, довга операція)
+      x-course: long-operation
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+            examples:
+              normal:
+                value: {}
+      responses:
+        "202":
+          description: Операцію прийнято
+          headers:
+            Location:
+              schema:
+                type: string
+              description: "/v1/operations/{op}"
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/operations/{op}:
+    get:
+      tags:
+        - operations
+      operationId: getOperation
+      summary: Стан довгої операції, доступний лише власнику
+      parameters:
+        - name: op
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Стан операції
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/me/notifications:
+    get:
+      tags:
+        - notifications
+      operationId: listNotifications
+      summary: Стрічка сповіщень після позиції
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Сповіщення з позиціями, що зростають
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Notification"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "410":
+          $ref: "#/components/responses/Gone"
+  /v1/me/notifications/head:
+    get:
+      tags:
+        - notifications
+      operationId: getNotificationsHead
+      summary: Поточна найбільша позиція стрічки
+      responses:
+        "200":
+          description: Позиція
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - position
+                properties:
+                  position:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/ws-tickets:
+    post:
+      tags:
+        - notifications
+      operationId: createWsTicket
+      summary: Одноразовий квиток для WebSocket
+      responses:
+        "201":
+          description: Квиток
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ticket
+                  - expires_at
+                properties:
+                  ticket:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/ws:
+    get:
+      tags:
+        - notifications
+      operationId: openNotificationChannel
+      summary: Канал сповіщень WebSocket через шлюз
+      description: Квиток передається в `?ticket=`. `Origin` — лише походження клієнта. Формат кадрів описано тут або 
+        в AsyncAPI.
+      security: []
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: З'єднання встановлено (WebSocket)
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Непрозорий курсор з `next_cursor` попередньої сторінки
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Ключ ідемпотентності. Повтор із тим самим ключем повертає збережений результат
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: "Без заголовка — 428"
+      schema:
+        type: string
+
+  headers:
+    RetryAfter:
+      description: Через скільки секунд повторити
+      schema:
+        type: integer
+        minimum: 0
+    RequestId:
+      description: Ідентифікатор запиту для журналу
+      schema:
+        type: string
+
+  schemas:
+    Problem:
+      type: object
+      required:
+        - type
+        - title
+        - status
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+    Page:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items: {}
+        next_cursor:
+          type:
+            - string
+            - "null"
+          description: "null — це остання сторінка"
+    Hold:
+      type: object
+      required:
+        - id
+        - book_id
+        - branch_id
+        - status
+        - version
+        - created_at
+      properties:
+        id:
+          type: string
+        book_id:
+          type: string
+        branch_id:
+          type: string
+        pickup_name:
+          type:
+            - string
+            - "null"
+        status:
+          type: string
+          enum:
+            - held
+            - collected
+            - returned
+            - expired
+            - cancelled
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    HoldCreate:
+      type: object
+      required:
+        - book_id
+        - branch_id
+      properties:
+        book_id:
+          type: string
+        branch_id:
+          type: string
+    HoldUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        pickup_name:
+          type: string
+          maxLength: 100
+    Money:
+      type: object
+      required:
+        - amount_minor
+        - currency
+      properties:
+        amount_minor:
+          type: integer
+          description: Сума в мінімальних одиницях (копійках)
+        currency:
+          type: string
+          examples:
+            - UAH
+    Operation:
+      type: object
+      required:
+        - id
+        - status
+        - version
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - running
+            - succeeded
+            - failed
+        version:
+          type: integer
+        result:
+          type:
+            - object
+            - "null"
+    Notification:
+      type: object
+      required:
+        - position
+        - kind
+        - payload
+        - created_at
+      properties:
+        position:
+          type: integer
+        kind:
+          type: string
+        payload:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: Некоректний запит
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: Потрібен вхід
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Forbidden:
+      description: Недостатньо прав
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: Не знайдено (або чужий об'єкт)
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Conflict:
+      description: Конфлікт із поточним станом (ресурсу немає, ключ ще обробляється)
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Gone:
+      description: Позицію вже видалено з історії. Завантажте поточний стан
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    PreconditionFailed:
+      description: Версія застаріла (If-Match)
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    PreconditionRequired:
+      description: Немає If-Match
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unprocessable:
+      description: Неправильні дані або той самий ключ ідемпотентності з іншим тілом
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    TooManyRequests:
+      description: Забагато запитів
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unavailable:
+      description: Тимчасово недоступно
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

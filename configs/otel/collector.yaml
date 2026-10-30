@@ -1,0 +1,22 @@
+# D1.4, D4.3: spans of every process (OTLP HTTP, port 4318) go to Jaeger (http://localhost:16686).
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch: {}
+exporters:
+  otlp_grpc/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+service:
+  pipelines:
+    traces:
+      receivers:
+        - otlp
+      processors:
+        - batch
+      exporters:
+        - otlp_grpc/jaeger

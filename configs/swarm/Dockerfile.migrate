@@ -1,0 +1,8 @@
+# The migrations as an image for Swarm (no bind mounts across machines). From the project root:
+#   docker build -f configs/swarm/Dockerfile.migrate -t localhost:5000/project-migrate:dev .
+FROM postgres:17.11
+
+COPY configs/migrate/migrate.sh /migrate/migrate.sh
+COPY migrations /migrations
+
+CMD ["sh", "/migrate/migrate.sh"]

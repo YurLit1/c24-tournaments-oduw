@@ -1,0 +1,34 @@
+# Local configuration and access tokens
+.env
+.env.*
+!.env.example
+!.env.template
+tokens.txt
+tokens-*.txt
+tokens_*.txt
+
+# Generated datasets and simulator state
+data/
+rows.csv
+state.jsonl
+runs/
+
+# Local environments and dependencies
+.venv/
+venv/
+node_modules/
+
+# Python and tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime logs and operating-system metadata
+logs/
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,159 @@
+# D6.4: the same system on several machines with Docker Swarm (README.md of this folder).
+# Run from the project root on the manager node:
+#   docker stack deploy -c configs/swarm/stack.yaml web
+# Images come from a registry every node can reach: REGISTRY (localhost:5000 - the registry
+# service of README.md), APP_TAG. Rolling update by the orchestrator - one task at a time, the
+# old task stops before its replacement starts (two nodes, one replica per node):
+#   docker service update --image ${REGISTRY:-localhost:5000}/project-web:v2 web_app
+
+x-env: &env
+  DATABASE_URL: postgresql://app:app@postgres:5432/app
+  KAFKA_BOOTSTRAP: broker:9092
+  EXTERNAL_URL: http://external-sim:8000
+  REDIS_URL: redis://redis:6379/0
+  CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:8081}
+  FAULTS: "off"  # enable with faults.yaml and a shared filesystem; see README
+
+x-image: &image ${REGISTRY:-localhost:5000}/project-web:${APP_TAG:-dev}
+
+services:
+  app:
+    image: *image
+    environment:
+      <<: *env
+      INSTANCE: "app-{{.Task.Slot}}"
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready').status==200 else
+          1)"
+      interval: 5s
+      retries: 3
+    stop_grace_period: 30s
+    deploy:
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      update_config:
+        parallelism: 1
+        order: stop-first
+        failure_action: rollback
+        monitor: 20s
+      rollback_config:
+        parallelism: 1
+
+  gateway:
+    image: *image
+    command:
+      - "uvicorn"
+      - "app.gateway:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--no-access-log"
+    environment:
+      <<: *env
+      INSTANCE: "gateway-{{.Task.Slot}}"
+      GROUP_ID: "gateway-{{.Task.Slot}}"
+    deploy:
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      update_config:
+        parallelism: 1
+        order: stop-first
+        delay: 10s
+
+  publisher:
+    image: *image
+    command:
+      - "python"
+      - "-m"
+      - "app.publisher"
+    environment:
+      <<: *env
+      INSTANCE: publisher
+  worker:
+    image: *image
+    command:
+      - "python"
+      - "-m"
+      - "app.worker"
+    environment:
+      <<: *env
+      INSTANCE: worker
+      GROUP_ID: worker
+
+  migrate:
+    image: ${REGISTRY:-localhost:5000}/project-migrate:${APP_TAG:-dev}
+    environment:
+      DATABASE_URL: "postgresql://app:app@postgres:5432/app"
+      MIGRATIONS_DIR: /migrations
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 10
+        delay: 5s
+
+  external-sim:
+    image: ${REGISTRY:-localhost:5000}/project-external-sim:${APP_TAG:-dev}
+    environment:
+      SIM_ROUTE: "${SIM_ROUTE:-/operations}"
+      SIM_STATE_FILE: /data/state.jsonl
+    volumes:
+      - simdata:/data
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.db == true"
+
+  postgres:
+    image: postgres:17.11
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.db == true"
+  redis:
+    image: redis:8.10.2
+  broker:
+    image: apache/kafka:4.3.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.db == true"
+
+  nginx:
+    image: nginx:1.31.7
+    ports:
+      - "8080:80"
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/conf.d/default.conf
+
+configs:
+  nginx_conf:
+    file: ./nginx-swarm.conf
+
+volumes:
+  pgdata:
+  simdata:

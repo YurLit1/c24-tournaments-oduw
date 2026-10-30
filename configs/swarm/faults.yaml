@@ -1,0 +1,30 @@
+# Optional fault injection; FAULTS_DIR must be the same shared filesystem on every node.
+services:
+  app:
+    environment:
+      FAULTS: "on"
+    volumes:
+      - type: bind
+        source: ${FAULTS_DIR:?Set FAULTS_DIR to a shared directory mounted on every node}
+        target: /faults
+  gateway:
+    environment:
+      FAULTS: "on"
+    volumes:
+      - type: bind
+        source: ${FAULTS_DIR:?Set FAULTS_DIR to a shared directory mounted on every node}
+        target: /faults
+  publisher:
+    environment:
+      FAULTS: "on"
+    volumes:
+      - type: bind
+        source: ${FAULTS_DIR:?Set FAULTS_DIR to a shared directory mounted on every node}
+        target: /faults
+  worker:
+    environment:
+      FAULTS: "on"
+    volumes:
+      - type: bind
+        source: ${FAULTS_DIR:?Set FAULTS_DIR to a shared directory mounted on every node}
+        target: /faults

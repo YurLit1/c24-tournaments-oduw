@@ -1,0 +1,208 @@
+# Example AsyncAPI 3.0 description (D4.2) for "Міська бібліотека": the channels of the guide and the
+# event envelope in CloudEvents 1.0 (D4.1). Copy it as asyncapi.yaml and put your event types in.
+# Check: npx @asyncapi/cli validate asyncapi.yaml
+asyncapi: 3.0.0
+info:
+  title: Міська бібліотека — події
+  version: 1.0.0
+  description: |
+    Події публікує лише публікатор із таблиці вихідних подій. Ключ повідомлення — ідентифікатор
+    сутності, тож події однієї сутності читаються по порядку. Повторна публікація зберігає `id`.
+defaultContentType: application/cloudevents+json
+
+servers:
+  local:
+    host: localhost:9094
+    protocol: kafka
+    description: Kafka з compose.yaml (усередині мережі Compose — broker:9092)
+
+channels:
+  domainEvents:
+    address: domain-events
+    description: Зафіксовані зміни предметного стану
+    messages:
+      holdCreated:
+        $ref: "#/components/messages/HoldCreated"
+      deliveryRequested:
+        $ref: "#/components/messages/DeliveryRequested"
+  domainEventsDlq:
+    address: domain-events.dlq
+    description: Карантин повідомлень, які не вдалося обробити за N спроб (Д4.4)
+    messages:
+      quarantined:
+        $ref: "#/components/messages/Quarantined"
+  notifications:
+    address: notifications
+    description: Сповіщення користувачам. Кожен шлюз читає всі повідомлення власною групою
+    messages:
+      notification:
+        $ref: "#/components/messages/Notification"
+
+operations:
+  publishDomainEvents:
+    action: send
+    channel:
+      $ref: "#/channels/domainEvents"
+    summary: Публікатор надсилає події з таблиці вихідних подій
+  handleDomainEvents:
+    action: receive
+    channel:
+      $ref: "#/channels/domainEvents"
+    summary: Обробник (група worker) викликає симулятор кур'єра й фіксує результат
+  quarantine:
+    action: send
+    channel:
+      $ref: "#/channels/domainEventsDlq"
+  deliverNotifications:
+    action: receive
+    channel:
+      $ref: "#/channels/notifications"
+    summary: Шлюзи gateway-a і gateway-b (групи gateway-a, gateway-b) надсилають сповіщення своїм з'єднанням
+
+components:
+  messages:
+    HoldCreated:
+      name: library.hold.created
+      headers:
+        $ref: "#/components/schemas/KafkaHeaders"
+      payload:
+        allOf:
+          - $ref: "#/components/schemas/CloudEvent"
+          - type: object
+            properties:
+              type:
+                const: library.hold.created.v1
+              data:
+                type: object
+                required:
+                  - hold_id
+                  - user_id
+                  - book_id
+                  - branch_id
+                  - version
+                properties:
+                  hold_id:
+                    type: string
+                  user_id:
+                    type: string
+                  book_id:
+                    type: string
+                  branch_id:
+                    type: string
+                  version:
+                    type: integer
+      examples:
+        - payload:
+            specversion: "1.0"
+            id: 0b7c2f8e-6f0c-4c7a-9d0e-3f1a2b4c5d6e
+            source: /library/holds
+            type: library.hold.created.v1
+            subject: h_123
+            time: "2026-10-12T09:15:00.000Z"
+            datacontenttype: application/json
+            data:
+              hold_id: h_123
+              user_id: reader1
+              book_id: b01
+              branch_id: central
+              version: 1
+    DeliveryRequested:
+      name: library.delivery.requested
+      headers:
+        $ref: "#/components/schemas/KafkaHeaders"
+      payload:
+        allOf:
+          - $ref: "#/components/schemas/CloudEvent"
+          - type: object
+            properties:
+              type:
+                const: library.delivery.requested.v1
+              data:
+                type: object
+                required:
+                  - operation_id
+                  - hold_id
+                properties:
+                  operation_id:
+                    type: string
+                    description: Ключ ідемпотентності для симулятора
+                  hold_id:
+                    type: string
+    Quarantined:
+      name: quarantined
+      payload:
+        type: object
+        required:
+          - event
+          - reason
+          - attempts
+        properties:
+          event:
+            $ref: "#/components/schemas/CloudEvent"
+          reason:
+            type: string
+          attempts:
+            type: integer
+          failed_at:
+            type: string
+            format: date-time
+    Notification:
+      name: notification
+      payload:
+        type: object
+        required:
+          - user_id
+          - position
+          - kind
+          - payload
+        properties:
+          user_id:
+            type: string
+          position:
+            type: integer
+            description: Позиція у стрічці користувача (О5.3)
+          kind:
+            type: string
+            examples:
+              - delivery.succeeded
+              - delivery.failed
+          payload:
+            type: object
+
+  schemas:
+    CloudEvent:
+      type: object
+      required:
+        - specversion
+        - id
+        - source
+        - type
+        - time
+        - data
+      properties:
+        specversion:
+          const: "1.0"
+        id:
+          type: string
+          description: Стабільний ідентифікатор події. Повтор публікації зберігає його
+        source:
+          type: string
+        type:
+          type: string
+          description: Тип із версією схеми, наприклад `library.hold.created.v1`
+        subject:
+          type: string
+          description: Ідентифікатор сутності (він же ключ повідомлення Kafka)
+        time:
+          type: string
+          format: date-time
+        datacontenttype:
+          const: application/json
+        data:
+          type: object
+    KafkaHeaders:
+      type: object
+      properties:
+        traceparent:
+          type: string
+          description: Контекст траси W3C (Д4.3)

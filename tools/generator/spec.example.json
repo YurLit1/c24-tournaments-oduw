@@ -1,0 +1,46 @@
+{
+  "seed": 42,
+  "table": "hold",
+  "columns": {
+    "id": {
+      "kind": "seq",
+      "prefix": "hb_"
+    },
+    "user_id": {
+      "kind": "ref",
+      "prefix": "bulk",
+      "count": 500
+    },
+    "branch_id": {
+      "kind": "const",
+      "value": "central"
+    },
+    "book_id": {
+      "kind": "const",
+      "value": "b02"
+    },
+    "status": {
+      "kind": "choice",
+      "values": [
+        "returned",
+        "cancelled",
+        "expired"
+      ],
+      "weights": [
+        6,
+        3,
+        1
+      ]
+    },
+    "created_at": {
+      "kind": "timestamp",
+      "from": "2025-01-01T00:00:00+00:00",
+      "days": 600
+    },
+    "expires_at": {
+      "kind": "timestamp",
+      "from": "2026-09-01T00:00:00+00:00",
+      "days": 30
+    }
+  }
+}

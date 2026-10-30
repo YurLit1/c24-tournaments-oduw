@@ -1,0 +1,55 @@
+{
+  "seed": 7,
+  "table": "hold",
+  "columns": {
+    "id": {
+      "kind": "seq",
+      "prefix": "hd_"
+    },
+    "user_id": {
+      "kind": "choice",
+      "values": [
+        "u-reader1",
+        "u-reader2"
+      ]
+    },
+    "branch_id": {
+      "kind": "const",
+      "value": "central"
+    },
+    "book_id": {
+      "kind": "choice",
+      "values": [
+        "b01",
+        "b02"
+      ],
+      "weights": [
+        3,
+        1
+      ]
+    },
+    "status": {
+      "kind": "choice",
+      "values": [
+        "returned",
+        "cancelled",
+        "expired"
+      ],
+      "weights": [
+        6,
+        3,
+        1
+      ]
+    },
+    "created_at": {
+      "kind": "timestamp",
+      "from": "2026-09-01T08:00:00+03:00",
+      "days": 30
+    },
+    "expires_at": {
+      "kind": "timestamp",
+      "from": "2026-10-01T08:00:00+03:00",
+      "days": 14
+    }
+  }
+}

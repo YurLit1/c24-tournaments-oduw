@@ -1,0 +1,71 @@
+# Example checks.yaml for "Міська бібліотека". Copy it as checks.yaml next to openapi.yaml.
+# The teacher's check reads both: here only what the contract cannot say.
+# Roles, examples and `items` belong to your domain; addresses and service names match the
+# given compose.yaml - change them only if you changed compose.yaml.
+
+# Chosen items besides the core (the core is always checked). Uncomment what you did.
+items:
+  - О1.5   # список із курсором
+  - О1.6   # система, /health, журнал JSON
+  # - О2.3   # повтор після втраченої відповіді (after_commit_before_response)
+  # - О2.4   # повторні спроби в клієнті
+  # - О3.3   # захист браузерних запитів (CORS, Origin, Sec-Fetch-Site)
+  # - О3.4   # вхід і доступ у клієнті
+  # - О4.4   # відновлення після керованих відмов
+  # - О4.5   # клієнт асинхронної операції
+  # - О5.3   # стрічка сповіщень і відновлення
+  # - О5.4   # клієнт сповіщень
+  # - О6.2   # сумісність версій (--replay)
+  # - О6.4   # поступове оновлення під навантаженням
+  # - Д1.4   # traceparent -> trace_id у журналі
+  # - Д2.1   # ліміт частоти змін (rate_limit нижче)
+  # - Д2.4   # умовна зміна з If-Match
+  # - Д2.5   # повторне скасування
+  # - Д3.1   # відкликання JWT
+  # - Д3.3   # обмеження спроб входу
+  # - Д5.3   # Server-Sent Events (sse нижче)
+  # - Д5.5   # контрольні сигнали (heartbeat_s нижче)
+
+# Roles of the users in GET /v1/me (default user, staff).
+role_names:
+  user: user
+  staff: staff
+
+# Direct addresses of the instances and the gateways: published ports of compose.yaml.
+instances:
+  app-a: "http://localhost:8001"
+  app-b: "http://localhost:8002"
+gateways:
+  - "ws://localhost:8091"
+  - "ws://localhost:8092"
+
+# Names of services in compose.yaml.
+services:
+  nginx: nginx
+  app-a: app-a
+  app-b: app-b
+  postgres: postgres
+  publisher: publisher
+  worker: worker
+  gateway-a: gateway-a
+  gateway-b: gateway-b
+
+# Fields of the JSON log line (server/app/jsonlog.py, middleware.py).
+log_fields:
+  time: time
+  instance: instance
+  route: route
+  status: status
+  duration: duration_ms
+
+# The route of the simulator that makes it unavailable for a while (O4.3).
+simulator_down: "/admin/unavailable?seconds={seconds}"
+
+rate_limit: 120           # Д2.1: changing requests per minute (RATE_LIMIT_PER_MIN in .env)
+heartbeat_s: 20           # Д5.5
+sse: /v1/sse              # Д5.3
+
+# Roles of routes without x-course marks in openapi.yaml, e.g.:
+# roles:
+#   main: {method: POST, path: /v1/holds}
+#   staff-action: {method: POST, path: "/v1/holds/{id}/collect"}

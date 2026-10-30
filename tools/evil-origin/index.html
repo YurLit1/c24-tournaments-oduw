@@ -1,0 +1,113 @@
+<!doctype html>
+<!--
+  O3.3: a page of ANOTHER site that tries to change state in your system.
+  Serve it on another origin than your client (from the project root):
+    python -m http.server 8082 --bind 127.0.0.1 --directory tools/evil-origin
+  and open http://localhost:8082 while you are logged in to your client on http://localhost:8081.
+  1. "fetch" - a cross-origin request with credentials: CORS must not let this page read the
+     answer, and a changing request must be refused (403) BEFORE the action.
+  2. "form" - a classic HTML form POST: no preflight, the browser sends cookies with it
+     (SameSite permitting). Your server must refuse it by Origin / Sec-Fetch-Site.
+  Check in the database that nothing changed (docker compose exec postgres psql -U app).
+-->
+<html lang="uk">
+<head>
+    <meta charset="utf-8">
+    <title>Сторонній сайт (О3.3)</title>
+    <style>
+        body {
+            font: 15px/1.5 system-ui, sans-serif;
+            max-width: 46rem;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        label {
+            display: block;
+            margin-top: .75rem;
+        }
+
+        input, textarea, select {
+            width: 100%;
+            font: inherit;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            height: 6rem;
+            font-family: ui-monospace, monospace;
+        }
+
+        button {
+            margin-top: 1rem;
+            margin-right: .5rem;
+            font: inherit;
+        }
+
+        pre {
+            background: #f3f3f3;
+            padding: .75rem;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>Сторонній сайт</h1>
+    <p>
+        Сторінка імітує чужий сайт, який намагається змінити стан у вашій системі від імені
+        користувача, що вже увійшов у ваш клієнт. Обидві спроби мають бути відхилені.
+    </p>
+
+    <label>Метод
+        <select id="method">
+            <option>POST</option>
+            <option>PATCH</option>
+            <option>DELETE</option>
+        </select>
+    </label>
+    <label>Адреса <input id="url" value="http://localhost:8080/v1/holds"></label>
+    <label>Тіло JSON <textarea id="body">{"book_id": "b01", "branch_id": "central"}</textarea></label>
+    <button id="fetch">fetch з credentials</button>
+    <button id="form">HTML-форма (без preflight)</button>
+
+    <h2>Результат</h2>
+    <pre id="out">—</pre>
+
+    <form id="evil" method="post" enctype="text/plain" target="sink" hidden>
+        <input id="evil-field">
+    </form>
+    <iframe name="sink" title="answer of the form" style="width:100%;height:8rem"></iframe>
+
+    <script>
+        const $ = (id) => document.getElementById(id);
+
+        $("fetch").onclick = async () => {
+            try {
+                const reply = await fetch($("url").value, {
+                    method: $("method").value,
+                    credentials: "include",
+                    headers: {"Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID()},
+                    body: $("body").value,
+                });
+                $("out").textContent = `status ${reply.status}\n${await reply.text()}`;
+            } catch (error) {
+                $("out").textContent =
+                    `the browser did not let this page read the answer (CORS): ${error}\n` +
+                    "Check in the database and the server log whether the action ran anyway.";
+            }
+        };
+
+        $("form").onclick = () => {
+            // text/plain form sends "name=value" as is: {"a": 1, "pad": "=" + "} keeps the body valid JSON
+            const form = $("evil");
+            const body = $("body").value.trim();
+            form.action = $("url").value;
+            $("evil-field").name = body.slice(0, -1) + ', "pad": "';
+            $("evil-field").value = '"}';
+
+            form.submit();
+            $("out").textContent = "the form was sent; its answer (if any) is in the frame below";
+        };
+    </script>
+</body>
+</html>

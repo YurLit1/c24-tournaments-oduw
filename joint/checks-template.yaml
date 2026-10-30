@@ -1,0 +1,48 @@
+# Copy to the project root as checks.yaml and adapt to your topic card.
+# Merge settings from each course's checks.yaml into its section: chosen items,
+# route roles, examples, role names, direct addresses and service mappings.
+# OpenAPI paths are relative to this file; URLs must be reachable by the checker.
+web:
+  openapi: web/openapi.yaml
+  base: http://localhost:8080
+  items: []
+  # services: {app-a: web-app-a, app-b: web-app-b}
+dpc:
+  openapi: dpc/openapi.yaml
+  base: http://localhost:8000
+  items: []
+  # services: {api: dpc-api}
+
+# Placeholder API, not a complete acceptance scenario.
+# reader is a Web user alias supplied to the teacher's checker.
+# Replace TODO-resource; add your invariants, repeats and cleanup.
+scenario:
+  - name: web-create
+    part: web
+    user: reader
+    method: POST
+    path: /v1/items
+    body:
+      resource_id: TODO-resource
+    idempotent: true
+    status: 201
+    save: item
+  - name: dpc-submit
+    part: dpc
+    method: POST
+    path: /v1/requests
+    body:
+      source_id: "{item}"
+    idempotent: true
+    status: 202
+    save: request
+  - name: web-result
+    part: web
+    user: reader
+    method: GET
+    path: "/v1/items/{item}"
+    status: 200
+    expect:
+      id: "{item}"
+      status: processed
+    wait: 120
