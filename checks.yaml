@@ -1,0 +1,22 @@
+items: []
+
+role_names:
+  user: user
+  staff: staff
+
+instances:
+  app-a: "http://localhost:8001"
+  app-b: "http://localhost:8002"
+
+services:
+  nginx: nginx
+  app-a: app-a
+  app-b: app-b
+  postgres: postgres
+
+log_fields:
+  time: time
+  instance: instance
+  route: route
+  status: status
+  duration: duration_ms
