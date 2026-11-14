@@ -1,11 +1,9 @@
 <!doctype html>
-<!-- Shell of the web client: login and one request form. Replace the form with the scenarios of
-     your card (O1.7, O3.4, O4.5, O5.4). Run: python -m http.server 8081 --bind 127.0.0.1 --directory client -->
 <html lang="uk">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Клієнт проєкту</title>
+    <title>C24 Ігрові турніри</title>
     <style>
         body {
             font: 15px/1.5 system-ui, sans-serif;
@@ -24,20 +22,38 @@
             margin: .4rem 0;
         }
 
-        input, select, textarea {
+        input, select {
             font: inherit;
             width: 100%;
             box-sizing: border-box;
         }
 
-        textarea {
-            height: 6rem;
-            font-family: ui-monospace, monospace;
-        }
-
         button {
             font: inherit;
             margin-top: .5rem;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        th, td {
+            border-bottom: 1px solid #ddd;
+            padding: .3rem;
+            text-align: left;
+        }
+
+        tr.pick {
+            cursor: pointer;
+        }
+
+        tr.pick:hover {
+            background: #f2f6ff;
+        }
+
+        tr.selected {
+            background: #dce8ff;
         }
 
         pre {
@@ -52,36 +68,33 @@
     </style>
 </head>
 <body>
-    <h1>Клієнт проєкту</h1>
+    <h1>C24 Ігрові турніри</h1>
 
     <fieldset>
-        <legend>Вхід</legend>
-        <form id="login-form">
-            <label>Логін <input name="login" autocomplete="username" required></label>
-            <label>Пароль <input name="password" type="password" autocomplete="current-password" required></label>
-            <button>Увійти</button>
-            <button type="button" id="logout">Вийти</button>
-        </form>
-        <p id="who">Не виконано вхід.</p>
+        <legend>Гравець</legend>
+        <label>X-User-Id
+            <select id="user">
+                <option value="u-player1">Гравець 1 (u-player1)</option>
+                <option value="u-player2">Гравець 2 (u-player2)</option>
+                <option value="u-player3">Гравець 3 (u-player3)</option>
+            </select>
+        </label>
     </fieldset>
 
     <fieldset>
-        <legend>Запит</legend>
-        <form id="request-form">
-            <label>Метод
-                <select name="method">
-                    <option>GET</option>
-                    <option>POST</option>
-                    <option>PATCH</option>
-                    <option>DELETE</option>
-                </select>
-            </label>
-            <label>Шлях <input name="path" value="/v1/me"></label>
-            <label>Тіло JSON (порожньо — без тіла)
-                <textarea name="body"></textarea>
-            </label>
-            <label><input type="checkbox" name="idempotent" style="width:auto"> з новим Idempotency-Key</label>
-            <button>Надіслати</button>
+        <legend>Турніри</legend>
+        <table>
+            <thead><tr><th>Гра</th><th>Початок</th><th>Вільно</th><th>Внесок</th></tr></thead>
+            <tbody id="tournaments"><tr><td colspan="4">Завантаження…</td></tr></tbody>
+        </table>
+        <button type="button" id="reload">Оновити список</button>
+    </fieldset>
+
+    <fieldset>
+        <legend>Реєстрація</legend>
+        <form id="register-form">
+            <label>Нікнейм (3–32 символи) <input name="nickname" value="neo"></label>
+            <button>Зареєструватися</button>
         </form>
     </fieldset>
 
@@ -89,9 +102,11 @@
     <pre id="out">—</pre>
 
     <script type="module">
-        import {call, login, logout, newKey, Problem} from "./api.js";
+        import {call, newKey, Problem} from "./api.js";
 
         const out = document.getElementById("out");
+        const body = document.getElementById("tournaments");
+        let selected = null;
 
         const show = (value, isProblem = false) => {
             out.className = isProblem ? "problem" : "";
@@ -101,50 +116,65 @@
         const report = (error) =>
             error instanceof Problem
                 ? show({status: error.status, ...error.body}, true)
-                : show(String(error), true);
+                : show(`Сервер недоступний: ${error}`, true);
 
-        async function refreshWho() {
+        const money = (minor, currency) => `${(minor / 100).toFixed(2)} ${currency}`;
+        const when = (iso, zone) => new Date(iso).toLocaleString("uk-UA", {timeZone: zone || "Europe/Kyiv"});
+
+        async function loadTournaments() {
             try {
-                const {data} = await call("GET", "/v1/me");
-                document.getElementById("who").textContent = `${data.name ?? data.id} (${data.role})`;
-            } catch {
-                document.getElementById("who").textContent = "Не виконано вхід.";
+                const {data} = await call("GET", "/v1/tournaments");
+                body.innerHTML = "";
+                for (const t of data?.items ?? []) {
+                    const tr = document.createElement("tr");
+                    tr.className = "pick" + (t.id === selected ? " selected" : "");
+                    for (const text of [t.game, when(t.starts_at, t.time_zone), `${t.available} / ${t.slots}`,
+                                        money(t.fee_minor, t.currency)]) {
+                        const td = document.createElement("td");
+                        td.textContent = text;
+                        tr.appendChild(td);
+                    }
+                    tr.onclick = () => {
+                        selected = t.id;
+                        for (const row of body.querySelectorAll("tr")) row.classList.remove("selected");
+                        tr.classList.add("selected");
+                    };
+                    body.appendChild(tr);
+                }
+            } catch (error) {
+                body.innerHTML = '<tr><td colspan="4">Не вдалося завантажити</td></tr>';
+                report(error);
             }
         }
 
-        document.getElementById("login-form").onsubmit = async (event) => {
+        document.getElementById("register-form").onsubmit = async (event) => {
             event.preventDefault();
-            const form = new FormData(event.target);
-            try {
-                await login(form.get("login"), form.get("password"));
-                await refreshWho();
-                show("вхід виконано");
-            } catch (error) {
-                report(error);
+            if (!selected) {
+                show("Оберіть турнір у таблиці", true);
+                return;
             }
-        };
-
-        document.getElementById("logout").onclick = async () => {
-            await logout().catch(report);
-            await refreshWho();
-        };
-
-        document.getElementById("request-form").onsubmit = async (event) => {
-            event.preventDefault();
             const form = new FormData(event.target);
-            const text = form.get("body").trim();
             try {
-                const reply = await call(form.get("method"), form.get("path"), {
-                    body: text ? JSON.parse(text) : undefined,
-                    idempotencyKey: form.get("idempotent") ? newKey() : undefined,
+                const reply = await call("POST", "/v1/registrations", {
+                    body: {tournament_id: selected, nickname: form.get("nickname")},
+                    headers: {"X-User-Id": document.getElementById("user").value},
+                    idempotencyKey: newKey(),
                 });
-                show({status: reply.status, location: reply.headers.get("location"), body: reply.data});
+                show({
+                    status: reply.status,
+                    location: reply.headers.get("location"),
+                    id: reply.data.id,
+                    state: reply.data.status,
+                    pay_until: when(reply.data.expires_at),
+                });
             } catch (error) {
                 report(error);
             }
+            await loadTournaments();
         };
 
-        refreshWho();
+        document.getElementById("reload").onclick = loadTournaments;
+        loadTournaments();
     </script>
 </body>
 </html>

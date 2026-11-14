@@ -11,23 +11,26 @@ Your work goes into new modules that you include below. Where each lab plugs in:
 The contract of all routes is your openapi.yaml (start from openapi.example.yaml).
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import cache, config, db, metrics, middleware, problems, registrations, service, telemetry
+from . import cache, config, db, idempotency, metrics, middleware, problems, registrations, service, telemetry
 from .jsonlog import log
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await db.open_pool()
+    cleanup = asyncio.create_task(idempotency.cleanup_loop())
 
     log("app.started")
     yield
 
+    cleanup.cancel()
     await cache.close()
     await db.close_pool()
 
@@ -46,6 +49,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[config.CLIENT_ORIGIN, config.CLIENT_ORIGIN.replace("localhost", "127.0.0.1")],
     allow_methods=["*"],
-    allow_headers=["Content-Type", "X-User-Id", "X-Request-ID"],
-    expose_headers=["Location", "X-Request-ID", "X-Instance"],
+    allow_headers=["Content-Type", "X-User-Id", "Idempotency-Key", "X-Request-ID"],
+    expose_headers=["Location", "X-Request-ID", "X-Instance", "Idempotent-Replayed", "Retry-After"],
 )

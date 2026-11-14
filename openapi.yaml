@@ -112,7 +112,12 @@ paths:
         В одній транзакції умовний UPDATE списує вільне місце турніру (available > 0, реєстрацію
         відкрито, турнір не почався) і створює реєстрацію в стані held до expires_at (+15 хвилин).
         Відповідь 201 надсилається лише після COMMIT. Власник — користувач із X-User-Id.
+        Заголовок Idempotency-Key обов'язковий. Ключ, відбиток тіла й відповідь зберігаються в тій самій
+        транзакції, що й реєстрація. Повтор із тим самим ключем і тілом повертає збережену відповідь,
+        предметна зміна не повторюється.
       x-course: main
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -146,6 +151,8 @@ paths:
                 type: string
             X-Request-ID:
               $ref: "#/components/headers/RequestId"
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
           content:
             application/json:
               schema:
@@ -216,6 +223,16 @@ components:
       schema:
         type: string
       example: 6f1c2a7e-3b0d-4c55-9a43-2f1d0e9b8c71
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Ключ ідемпотентності запиту, однаковий в усіх повторних спробах
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+      example: 0b9c6a1e-5f6d-4c0e-9d59-6f0f6f1f2a10
 
   headers:
     RetryAfter:
@@ -227,6 +244,12 @@ components:
       description: Ідентифікатор запиту для журналу
       schema:
         type: string
+    IdempotentReplayed:
+      description: Є у відповіді, якщо повернуто збережений результат попереднього запиту з цим ключем
+      schema:
+        type: string
+        enum:
+          - "true"
 
   schemas:
     Problem:
@@ -335,7 +358,7 @@ components:
 
   responses:
     BadRequest:
-      description: Пошкоджений JSON
+      description: Пошкоджений JSON або немає заголовка Idempotency-Key
       content:
         application/problem+json:
           schema:
@@ -345,6 +368,12 @@ components:
               value:
                 type: https://example.edu/problems/malformed-json
                 title: Request body is not valid JSON
+                status: 400
+                instance: /v1/registrations
+            keyRequired:
+              value:
+                type: https://example.edu/problems/idempotency-key-required
+                title: Idempotency-Key header is required
                 status: 400
                 instance: /v1/registrations
     NotFound:
@@ -362,7 +391,10 @@ components:
                 detail: No tournament t-none
                 instance: /v1/registrations
     Conflict:
-      description: Місць немає, реєстрацію закрито або гравець чи нікнейм уже зареєстровані
+      description: Місць немає, реєстрацію закрито, гравець чи нікнейм уже зареєстровані або запит із цим ключем ще обробляється
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
       content:
         application/problem+json:
           schema:
@@ -375,8 +407,15 @@ components:
                 status: 409
                 detail: Registration is closed or all slots are taken
                 instance: /v1/registrations
+            inProgress:
+              value:
+                type: https://example.edu/problems/request-in-progress
+                title: Request in progress
+                status: 409
+                detail: A request with this Idempotency-Key is still being processed
+                instance: /v1/registrations
     Unprocessable:
-      description: Неправильні дані (нікнейм поза 3–32 символами, немає X-User-Id, невідомий користувач)
+      description: Неправильні дані (нікнейм поза 3–32 символами, немає X-User-Id, невідомий користувач) або той самий ключ з іншим тілом
       content:
         application/problem+json:
           schema:
@@ -387,6 +426,13 @@ components:
                 type: https://example.edu/problems/invalid-request
                 title: Invalid request data
                 status: 422
+                instance: /v1/registrations
+            keyReused:
+              value:
+                type: https://example.edu/problems/idempotency-key-reused
+                title: Idempotency-Key reused
+                status: 422
+                detail: This Idempotency-Key was used with a different request body
                 instance: /v1/registrations
     Unavailable:
       description: Тимчасово недоступно
