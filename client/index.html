@@ -71,14 +71,14 @@
     <h1>C24 Ігрові турніри</h1>
 
     <fieldset>
-        <legend>Гравець</legend>
-        <label>X-User-Id
-            <select id="user">
-                <option value="u-player1">Гравець 1 (u-player1)</option>
-                <option value="u-player2">Гравець 2 (u-player2)</option>
-                <option value="u-player3">Гравець 3 (u-player3)</option>
-            </select>
-        </label>
+        <legend>Вхід</legend>
+        <form id="login-form">
+            <label>Логін <input name="login" value="player1" autocomplete="username"></label>
+            <label>Пароль <input name="password" type="password" value="player-pass" autocomplete="current-password"></label>
+            <button>Увійти</button>
+            <button type="button" id="logout">Вийти</button>
+        </form>
+        <p id="who">Вхід не виконано.</p>
     </fieldset>
 
     <fieldset>
@@ -102,7 +102,7 @@
     <pre id="out">—</pre>
 
     <script type="module">
-        import {call, newKey, Problem} from "./api.js";
+        import {call, login, logout, newKey, Problem} from "./api.js";
 
         const out = document.getElementById("out");
         const body = document.getElementById("tournaments");
@@ -147,6 +147,38 @@
             }
         }
 
+        async function refreshWho() {
+            const who = document.getElementById("who");
+            try {
+                const {data} = await call("GET", "/v1/me");
+                who.textContent = `${data.name ?? data.id} (${data.id}), роль ${data.role}`;
+            } catch {
+                who.textContent = "Вхід не виконано.";
+            }
+        }
+
+        document.getElementById("login-form").onsubmit = async (event) => {
+            event.preventDefault();
+            const form = new FormData(event.target);
+            try {
+                const data = await login(form.get("login"), form.get("password"));
+                show({status: 200, token_type: data.token_type, expires_at: when(data.expires_at)});
+            } catch (error) {
+                report(error);
+            }
+            await refreshWho();
+        };
+
+        document.getElementById("logout").onclick = async () => {
+            try {
+                await logout();
+                show("Вихід виконано");
+            } catch (error) {
+                report(error);
+            }
+            await refreshWho();
+        };
+
         document.getElementById("register-form").onsubmit = async (event) => {
             event.preventDefault();
             if (!selected) {
@@ -157,7 +189,6 @@
             try {
                 const reply = await call("POST", "/v1/registrations", {
                     body: {tournament_id: selected, nickname: form.get("nickname")},
-                    headers: {"X-User-Id": document.getElementById("user").value},
                     idempotencyKey: newKey(),
                 });
                 show({
@@ -174,6 +205,7 @@
         };
 
         document.getElementById("reload").onclick = loadTournaments;
+        refreshWho();
         loadTournaments();
     </script>
 </body>

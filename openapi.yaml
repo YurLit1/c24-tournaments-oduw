@@ -3,7 +3,8 @@ info:
   title: C24 Ігрові турніри
   version: 1.0.0
   description: |
-    Контракт API. До ЛР3 користувача передають заголовком X-User-Id (u-player1, u-player2, u-player3, u-organizer).
+    Контракт API. Вхід: POST /v1/auth/login повертає непрозорий токен, далі запити несуть
+    Authorization: Bearer <токен>. Заголовок X-User-Id не приймається.
     Помилки — Problem Details (RFC 9457, `application/problem+json`).
     Ідентифікатори — рядки. Гроші — ціле число копійок і валюта. Час — RFC 3339 із зоною.
   license:
@@ -12,11 +13,13 @@ info:
 servers:
   - url: http://localhost:8080
 security:
-  - userId: []
+  - bearerAuth: []
 
 tags:
   - name: service
     description: Службові маршрути
+  - name: auth
+    description: Вхід, вихід і поточний користувач
   - name: tournaments
     description: Турніри й реєстрації гравців
 
@@ -57,6 +60,119 @@ paths:
           description: Готовий
         "503":
           $ref: "#/components/responses/Unavailable"
+
+  /v1/auth/login:
+    post:
+      tags:
+        - auth
+      operationId: login
+      summary: Вхід за логіном і паролем
+      description: |
+        Повертає непрозорий токен зі строком дії 8 годин. На сервері зберігається лише SHA-256 токена
+        в таблиці session, тому токен приймають обидва екземпляри.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - login
+                - password
+              properties:
+                login:
+                  type: string
+                password:
+                  type: string
+                  format: password
+            examples:
+              player:
+                value:
+                  login: player1
+                  password: player-pass
+              staff:
+                value:
+                  login: organizer
+                  password: organizer-pass
+      responses:
+        "200":
+          description: Вхід виконано
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - access_token
+                  - token_type
+                  - expires_at
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                    examples:
+                      - Bearer
+                  expires_at:
+                    type: string
+                    format: date-time
+              examples:
+                ok:
+                  value:
+                    access_token: 3q2-7wEFvu8oBq1Wc0aJX2c0mVZk1d5hQy9o6sT4n1I
+                    token_type: Bearer
+                    expires_at: "2026-11-14T20:00:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /v1/auth/logout:
+    post:
+      tags:
+        - auth
+      operationId: logout
+      summary: Вихід, запис сесії на сервері знищується
+      responses:
+        "204":
+          description: Вихід виконано, токен більше не діє
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/me:
+    get:
+      tags:
+        - auth
+      operationId: getMe
+      summary: Поточний користувач і роль
+      responses:
+        "200":
+          description: Поточний користувач
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - role
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  role:
+                    type: string
+                    enum:
+                      - user
+                      - staff
+              examples:
+                player:
+                  value:
+                    id: u-player1
+                    name: Гравець 1
+                    role: user
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/tournaments:
     get:
@@ -111,7 +227,7 @@ paths:
       description: |
         В одній транзакції умовний UPDATE списує вільне місце турніру (available > 0, реєстрацію
         відкрито, турнір не почався) і створює реєстрацію в стані held до expires_at (+15 хвилин).
-        Відповідь 201 надсилається лише після COMMIT. Власник — користувач із X-User-Id.
+        Відповідь 201 надсилається лише після COMMIT. Власник — користувач, що виконав вхід.
         Заголовок Idempotency-Key обов'язковий. Ключ, відбиток тіла й відповідь зберігаються в тій самій
         транзакції, що й реєстрація. Повтор із тим самим ключем і тілом повертає збережену відповідь,
         предметна зміна не повторюється.
@@ -169,6 +285,8 @@ paths:
                     expires_at: "2026-10-29T10:15:00Z"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -202,18 +320,17 @@ paths:
                     version: 1
                     created_at: "2026-10-29T10:00:00Z"
                     expires_at: "2026-10-29T10:15:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-        "422":
-          $ref: "#/components/responses/Unprocessable"
 
 components:
   securitySchemes:
-    userId:
-      type: apiKey
-      in: header
-      name: X-User-Id
-      description: До ЛР3 — id заздалегідь створеного користувача
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Непрозорий токен із POST /v1/auth/login
 
   parameters:
     Id:
@@ -376,6 +493,25 @@ components:
                 title: Idempotency-Key header is required
                 status: 400
                 instance: /v1/registrations
+    Unauthorized:
+      description: Немає токена, токен невідомий, строк дії минув або неправильний логін чи пароль
+      headers:
+        WWW-Authenticate:
+          description: Схема автентифікації
+          schema:
+            type: string
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            noToken:
+              value:
+                type: https://example.edu/problems/unauthorized
+                title: Unauthorized
+                status: 401
+                detail: "Authorization: Bearer <token> is required"
+                instance: /v1/me
     NotFound:
       description: Не знайдено (або чужий об'єкт)
       content:
@@ -415,7 +551,7 @@ components:
                 detail: A request with this Idempotency-Key is still being processed
                 instance: /v1/registrations
     Unprocessable:
-      description: Неправильні дані (нікнейм поза 3–32 символами, немає X-User-Id, невідомий користувач) або той самий ключ з іншим тілом
+      description: Неправильні дані (нікнейм поза 3–32 символами, немає обов'язкового поля) або той самий ключ з іншим тілом
       content:
         application/problem+json:
           schema:

@@ -5,6 +5,10 @@ JSON='Content-Type: application/json'
 fail=0
 
 sql() { docker compose exec -T postgres psql -q -At -U app -d app -c "$1"; }
+token() {
+  curl -s -X POST "$A/v1/auth/login" -H "$JSON" -d "{\"login\":\"$1\",\"password\":\"$2\"}" \
+    | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'
+}
 newkey() { echo "check-$(date +%s)-$RANDOM$RANDOM"; }
 body() { printf '%s\n' "$LAST" | tail -1; }
 header() { printf '%s\n' "$LAST" | grep -i "^$1:" | cut -d' ' -f2-; }
@@ -13,8 +17,8 @@ check() { if [ "$2" = "$3" ]; then echo "OK   $1"; else echo "FAIL $1: очік�
 sql "DELETE FROM registration WHERE tournament_id = 't-cs2'; UPDATE tournament SET available = slots WHERE id = 't-cs2';" \
   || { echo "не вдалося скинути дані: система запущена?"; exit 1; }
 
-P1='X-User-Id: u-player1'
-P2='X-User-Id: u-player2'
+P1="Authorization: Bearer $(token player1 player-pass)"
+P2="Authorization: Bearer $(token player2 player-pass)"
 
 expect() {
   local name=$1 code=$2; shift 2

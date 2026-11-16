@@ -14,6 +14,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 parser = argparse.ArgumentParser()
 parser.add_argument("--tournament", default="t-race")
 parser.add_argument("--players", type=int, default=200)
+parser.add_argument("--password", default="race-pass")
 parser.add_argument("--instances", nargs="+", default=["http://localhost:8001", "http://localhost:8002"])
 args = parser.parse_args()
 
@@ -37,11 +38,22 @@ def post(url: str, body: dict, headers: dict) -> tuple[int, dict, str]:
         return error.code, json.loads(error.read() or b"{}"), error.headers.get("X-Instance", "?")
 
 
+def login(n: int) -> str:
+    status, body, _ = post(f"{args.instances[n % len(args.instances)]}/v1/auth/login",
+                           {"login": f"race{n:03d}", "password": args.password}, {})
+    if status != 200:
+        sys.exit(f"вхід race{n:03d}: {status}")
+    return body["access_token"]
+
+
 psql(f"DELETE FROM registration WHERE tournament_id = '{args.tournament}'; "
      f"UPDATE tournament SET available = slots WHERE id = '{args.tournament}'")
 slots = int(psql(f"SELECT slots FROM tournament WHERE id = '{args.tournament}'"))
 
 numbers = range(1, args.players + 1)
+with ThreadPoolExecutor(20) as pool:
+    tokens = dict(zip(numbers, pool.map(login, numbers)))
+
 start = threading.Barrier(args.players)
 
 
@@ -50,7 +62,7 @@ def register(n: int) -> tuple[int, str, str]:
     status, body, instance = post(
         f"{args.instances[n % len(args.instances)]}/v1/registrations",
         {"tournament_id": args.tournament, "nickname": f"racer{n:03d}"},
-        {"X-User-Id": f"u-race{n:03d}", "Idempotency-Key": str(uuid.uuid4())})
+        {"Authorization": f"Bearer {tokens[n]}", "Idempotency-Key": str(uuid.uuid4())})
     return status, instance, body.get("type", "").rsplit("/", 1)[-1]
 
 

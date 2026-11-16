@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import cache, config, db, idempotency, metrics, middleware, problems, registrations, service, telemetry
+from . import auth, cache, config, db, idempotency, metrics, middleware, problems, registrations, service, telemetry
 from .jsonlog import log
 
 
@@ -44,11 +44,12 @@ problems.install(app)
 app.include_router(service.router)
 app.include_router(metrics.router)
 telemetry.install(app)
+app.include_router(auth.router)
 app.include_router(registrations.router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[config.CLIENT_ORIGIN, config.CLIENT_ORIGIN.replace("localhost", "127.0.0.1")],
     allow_methods=["*"],
-    allow_headers=["Content-Type", "X-User-Id", "Idempotency-Key", "X-Request-ID"],
+    allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Request-ID"],
     expose_headers=["Location", "X-Request-ID", "X-Instance", "Idempotent-Replayed", "Retry-After"],
 )

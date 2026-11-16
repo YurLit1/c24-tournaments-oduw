@@ -3,15 +3,19 @@ BASE=${BASE:-http://localhost:8080}
 JSON='Content-Type: application/json'
 fail=0
 
+token() {
+  curl -s -X POST "$BASE/v1/auth/login" -H "$JSON" -d "{\"login\":\"$1\",\"password\":\"$2\"}" \
+    | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'
+}
 key() { echo "Idempotency-Key: check-$(date +%s)-$RANDOM$RANDOM"; }
 
 docker compose exec -T postgres psql -q -U app -d app -c \
   "DELETE FROM registration WHERE tournament_id = 't-cs2'; UPDATE tournament SET available = slots WHERE id = 't-cs2';" \
   || { echo "не вдалося скинути дані: система запущена?"; exit 1; }
 
-P1='X-User-Id: u-player1'
-P2='X-User-Id: u-player2'
-P3='X-User-Id: u-player3'
+P1="Authorization: Bearer $(token player1 player-pass)"
+P2="Authorization: Bearer $(token player2 player-pass)"
+P3="Authorization: Bearer $(token player3 player-pass)"
 
 expect() {
   local name=$1 code=$2 ctype=$3; shift 3

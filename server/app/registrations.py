@@ -1,13 +1,13 @@
 import json
 from typing import Any
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from psycopg import AsyncConnection, errors
 from pydantic import BaseModel, Field
 
-from . import db, idempotency
+from . import auth, db, idempotency
 from .problems import Problem
 
 HOLD_MINUTES = 15
@@ -62,35 +62,33 @@ async def register(conn: AsyncConnection, user_id: str, body: RegistrationCreate
 
 @router.post("/v1/registrations", status_code=201)
 async def create_registration(request: Request, body: RegistrationCreate,
-                              x_user_id: str = Header(),
+                              user: dict[str, Any] = Depends(auth.current_user),
                               idempotency_key: str | None = Header(default=None)) -> JSONResponse:
     key = idempotency.check_key(idempotency_key)
     request_hash = idempotency.fingerprint(body.model_dump())
     async with db.connection() as conn:
         async with conn.transaction():
-            try:
-                saved = await idempotency.claim(conn, x_user_id, OPERATION, key, request_hash)
-            except errors.ForeignKeyViolation:
-                raise Problem(422, "unknown-user", "Unknown user", "X-User-Id does not match an existing user")
+            saved = await idempotency.claim(conn, user["id"], OPERATION, key, request_hash)
             if saved is not None:
                 return idempotency.reply(saved["status_code"], saved["location"], saved["response"], True)
             try:
                 async with conn.transaction():
-                    reg = await register(conn, x_user_id, body)
+                    reg = await register(conn, user["id"], body)
                 status_code, location, response = 201, f"/v1/registrations/{reg['id']}", jsonable_encoder(reg)
             except Problem as problem:
                 status_code, location = problem.status, None
                 response = json.loads(problem.response(request.url.path).body)
-            await idempotency.finish(conn, x_user_id, OPERATION, key, status_code, location, response)
+            await idempotency.finish(conn, user["id"], OPERATION, key, status_code, location, response)
     return idempotency.reply(status_code, location, response, False)
 
 
 @router.get("/v1/registrations/{registration_id}")
-async def get_registration(registration_id: str, x_user_id: str = Header()) -> JSONResponse:
+async def get_registration(registration_id: str,
+                           user: dict[str, Any] = Depends(auth.current_user)) -> JSONResponse:
     async with db.connection() as conn:
         cur = await conn.execute(
             f"SELECT {REG_COLUMNS} FROM registration WHERE id = %s AND user_id = %s",
-            (registration_id, x_user_id))
+            (registration_id, user["id"]))
         reg = await cur.fetchone()
     if reg is None:
         raise Problem(404, "registration-not-found", "Registration not found",
